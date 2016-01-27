@@ -1,0 +1,428 @@
+---
+  html_document:
+    toc: true
+    highlight: zenburn
+    theme: united
+---
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(tidy=TRUE, highlight=TRUE, dev="png",
+               cache=FALSE, highlight=TRUE, autodep=TRUE, warning=FALSE, error=FALSE,
+               message=FALSE, prompt=TRUE, comment='', fig.cap='')
+```
+
+# Overview
+
+We ran the samples through bcbio-nextgen and quantitated the transcript level
+counts using Sailfish. We then added all of counts for each transcript together
+to get the gene level counts. This has been shown to be a slightly more accurate
+way to look at the data and Sailfish in particular does a much better job than
+traditional methods accurately quantitating genes that have many homologs.
+
+```{r qc-setup}
+library(ggplot2)
+library(reshape)
+library(gplots)
+library(edgeR)
+library(CHBUtils)
+library(pheatmap)
+library(DESeq2)
+library(tximport)
+library(logging)
+basicConfig()
+project_summary = "/Users/rory/cache/carlone-pancreas-rnaseq/2016-01-26_carlone-pancreas/project-summary.csv"
+counts_file = "/Users/rory/cache/carlone-pancreas-rnaseq/2016-01-26_carlone-pancreas/combined.counts"
+tx2genes_file = "../tx2gene.csv"
+bPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442",
+"#0072B2", "#D55E00", "#CC79A7")
+summarydata = data.frame(read.table(project_summary, header=TRUE, sep=","), row.names="Name", check.rows=FALSE)
+summarydata$Name = rownames(summarydata)
+summarydata = summarydata[order(summarydata$Name),]
+summarydata$pool = as.factor(summarydata$pool)
+summarydata$group = paste(summarydata$sex, summarydata$pool, sep="")
+if (file.exists(tx2genes_file)) {
+  loginfo("Using gene counts calculated from the Sailfish transcript counts.")
+  sf_files = file.path("..", "..", rownames(summarydata), "sailfish",
+                      rownames(summarydata), "quant.sf")
+  names(sf_files) = rownames(summarydata)
+  tx2gene = read.table(tx2genes_file, sep=",", row.names=NULL, header=FALSE)
+  txi.salmon = tximport(sf_files, type="salmon", tx2gene=tx2gene,
+                        reader=readr::read_tsv)
+  counts = as.data.frame(round(txi.salmon$counts))
+} else {
+  loginfo("Using gene counts calculated from featureCounts.")
+  counts = read.table(counts_file, header=TRUE, row.names="id", check.names=FALSE)
+}
+counts = counts[, order(colnames(counts)), drop=FALSE]
+colnames(counts) = gsub(".counts", "", colnames(counts))
+
+# this is a list of all non user-supplied metadata columns that could appear
+known_columns = c("Name", "X.GC", "Exonic.Rate", "Sequences.flagged.as.poor.quality",
+    "rRNA_rate", "Fragment.Length.Mean", "Intronic.Rate", "Intergenic.Rate",
+    "Mapping.Rate", "Quality.format", "Duplication.Rate.of.Mapped", "Mapped",
+    "rRNA", "Sequence.length", "Transcripts.Detected", "Mean.Per.Base.Cov.",
+    "Genes.Detected", "Unique.Starts.Per.Read", "unique_starts_per_read",
+    "complexity", "X5.3.bias", "Duplicates.pct", "Duplicates", "Mapped.reads",
+    "Median.insert.size", "Mapped.reads.pct", "Total.reads",
+    "avg_coverage_per_region", "Mapped.Reads")
+metadata = summarydata[, !colnames(summarydata) %in% known_columns, drop=FALSE]
+```
+
+```{r heatmap-function}
+get_heatmap_fn = function(summarydata) {
+    # return the pheatmap function with or without metadata
+    if(ncol(metadata) == 0) {
+       return(pheatmap)
+    }
+    else {
+    # rownames(metadata) = summarydata$Name
+    heatmap_fn = function(data, ...) {
+        pheatmap(data, annotation=metadata, ...)
+    }
+    return(heatmap_fn)
+}}
+heatmap_fn = get_heatmap_fn(summarydata)
+```
+
+# Quality control metrics
+
+## Mapped reads
+There are about 60 million mapped reads per sample and not a lot of variation
+between the samples.
+
+```{r mapped-plot, eval="Mapped" %in% colnames(summarydata)}
+ggplot(summarydata, aes(x=Name, y=Mapped)) +
+    theme_bw(base_size=10) +
+    theme(panel.grid.major = element_line(size = .5, color = "grey"),
+          axis.text.x = element_text(angle=90)) +
+    geom_bar(stat="identity") +
+    ylab("mapped reads") + xlab("")
+```
+
+```{r mapped-plot-noqualimap, eval="Mapped.reads" %in% colnames(summarydata) &&
+                                   !"Mapped" %in% colnames(summarydata)}
+ggplot(summarydata, aes(x=Name, y=Mapped.reads)) +
+    theme_bw(base_size=10) +
+    theme(panel.grid.major = element_line(size = .5, color = "grey"),
+          axis.text.x = element_text(angle=90)) +
+    geom_bar(stat="identity") +
+    ylab("mapped reads") + xlab("")
+```
+
+## Genomic mapping rate
+The mapping rate looks great and is similar for all of the samples, another
+good sign.
+```{r mapping-rate-plot, eval="Mapping.Rate" %in% colnames(summarydata)}
+ggplot(summarydata, aes(x=Name, y=Mapping.Rate)) +
+    geom_bar(stat="identity") +
+    ylab("mapping rate") + xlab("") +
+    theme_bw(base_size=10) +
+    theme(panel.grid.major = element_line(size = .5, color = "grey"),
+          axis.text.x = element_text(angle=90))
+```
+
+```{r mapping-rate-plot-noqualimap, eval="Mapped.reads.pct" %in% colnames(summarydata)}
+ggplot(summarydata, aes(x=Name, y=Mapped.reads.pct)) +
+    geom_bar(stat="identity") +
+    ylab("mapping rate") + xlab("") +
+    theme_bw(base_size=10) +
+    theme(panel.grid.major = element_line(size = .5, color = "grey"),
+          axis.text.x = element_text(angle=90))
+```
+
+## Number of genes detected
+We see a high number of genes detected per sample, and a similar number per sample.
+This is also a good sign.
+
+```{r genes-detected-plot, eval="Genes.Detected" %in% colnames(summarydata)}
+dd = data.frame(Name=colnames(counts), Genes.Detected = colSums(counts > 0))
+ggplot(dd, aes(x=Name, y=Genes.Detected)) +
+    geom_bar(stat="identity") +
+    theme_bw(base_size=10) +
+    theme(panel.grid.major = element_line(size = .5, color = "grey"),
+          axis.text.x = element_text(angle=90)) +
+    ylab("genes detected") + xlab("")
+```
+
+## Exonic mapping rate
+The rate that reads map to exons looks good and is similar for all of the
+samples, this is good. A low exonic mapping rate can indicate DNA contamination
+in the samples.
+```{r exonic-mapping-plot, eval="Exonic.Rate" %in% colnames(summarydata)}
+ggplot(summarydata, aes(x=Name, y=Exonic.Rate)) +
+    geom_bar(stat="identity") +
+    theme_bw(base_size=10) +
+    theme(panel.grid.major = element_line(size = .5, color = "grey"),
+          axis.text.x = element_text(angle=90)) +
+    ylab("exonic mapping rate") + xlab("")
+```
+
+## rRNA mapping rate
+There are not a lot of reads mapping to rRNA, which is another good sign. There
+is not much variation between the samples as well.
+
+```{r check-rRNA-eval}
+eval_rRNA = "rRNA_rate" %in% colnames(summarydata) & !sum(is.na(summarydata$rRNA_rate)) == nrow(summarydata)
+```
+```{r rRNA-rate-plot, eval=eval_rRNA}
+ggplot(summarydata, aes(x=Name, y=rRNA_rate)) +
+    geom_bar(stat="identity") +
+    theme_bw(base_size=10) +
+    theme(panel.grid.major = element_line(size = .5, color = "grey"),
+          axis.text.x = element_text(angle=90)) +
+    ylab("rRNA rate") + xlab("")
+```
+
+## Boxplot of log10 counts per gene
+The distribution of counts in each sample is very similar, which is what we
+expect.
+
+```{r boxplot-raw}
+melted = melt(counts)
+colnames(melted) = c("sample", "count")
+melted$sample = factor(melted$sample)
+melted = melted[order(melted$sample),]
+melted$count = log(melted$count)
+ggplot(melted, aes(x=sample, y=count)) + geom_boxplot() +
+    theme_bw(base_size=10) +
+    theme(panel.grid.major = element_line(size = .5, color = "grey"),
+          axis.text.x = element_text(angle=90)) + xlab("")
+```
+
+## Boxplot of log10 TMM-normalized counts per gene
+Trimmed mean of M-values (TMM) normalization is described
+[here](http://genomebiology.com/2010/11/3/R25)
+
+Robinson, M. D., & Oshlack, A. (2010). A scaling normalization method for differential expression analysis of RNA-seq data. Genome Biology, 11(3). doi:10.1186/gb-2010-11-3-r25
+
+Normalizing the counts makes them extremely similar.
+
+```{r boxplot-normalized}
+y = DGEList(counts=counts)
+y = calcNormFactors(y)
+normalized_counts = cpm(y, normalized.lib.sizes=TRUE)
+melted = melt(normalized_counts)
+colnames(melted) = c("gene", "sample", "count")
+melted$sample = factor(melted$sample)
+melted = melted[order(melted$sample),]
+melted$count = log(melted$count)
+ggplot(melted, aes(x=sample, y=count)) + geom_boxplot() +
+    theme_bw(base_size=10) +
+    theme(panel.grid.major = element_line(size = .5, color = "grey"),
+          axis.text.x = element_text(angle=90)) + xlab("")
+```
+
+## Density of log10 TMM-normalized counts
+The distribution of counts pretty similar for each sample, another good sign.
+```{r density-normalized}
+ggplot(melted, aes(x=count, group=sample)) +
+    geom_density() +
+    theme_bw(base_size=10) +
+    theme(panel.grid.major = element_line(size = .5, color = "grey"),
+          axis.text.x = element_text(angle=90)) + xlab("")
+```
+
+## Correlation (Pearson) heatmap of TMM-normalized counts
+Calculation the Pearson and Spearman correlation between the samples shows
+the red fraction and the negative fraction are more similar to each other.
+
+There are pairs of samples which are correlated to each other as well,
+F3 is similar to M2 and F4 is similar to M1. Normally we'd expect the sexes
+to cluster together. Calculating correlations like this is a pretty
+dirty way to measure similarity and can be greatly affected by noise, but it
+is still strange.
+
+From the metadata we were given, it doesn't look like there is a reason for
+that. Is there any reason you can think of that those should go together?
+
+```{r pearson-heatmap-normalized, eval=ncol(counts) > 1}
+heatmap_fn(cor(normalized_counts, method="pearson"))
+```
+
+## Correlation (Spearman) heatmap of TMM-normalized counts
+```{r spearman-heatmap-normalized, eval=ncol(counts) > 1}
+heatmap_fn(cor(normalized_counts, method="spearman"))
+```
+
+## PCA plot
+PCA is a more robust way to compare the samples. Here we see that the samples
+separate along the first component by positive/negative fraction and along
+the second component by sex. Sex is conflated with sort date though, so we have
+no idea if the differences is due to sex or due to sort date.
+
+```{r pca, eval=ncol(counts) > 1}
+dds = DESeqDataSetFromMatrix(countData=counts, colData=summarydata, design=~group+sort_fraction)
+vst = varianceStabilizingTransformation(dds)
+plotPCA(vst, intgroup=c("group", "sort_fraction"))
+```
+
+## Summary of quality control
+The samples look good-- there aren't any glaring issues with them, so that is the
+first big step in getting something out of the data. The samples worked and
+the samples cluster by what we expected them to, along sex/sort-date and
+which sorting fraction they were from. Also the fraction they were from is
+the dominant difference between the samples. You can see that by looking at the
+percentage of variance explained number on the x and y axis of the PCA plot above.
+
+```{r de-setup}
+library(DESeq2)
+library(DEGreport)
+library(vsn)
+design = ~group+sort_fraction
+condition = "sort_fraction"
+```
+
+# Differential expression
+Now we will do differential expression with DESeq2. We will fit a negative
+binomial GLM to the data and treat the samples as paired, comparing the
+positive and negative fractions within one sample to each other.
+
+```{r deseq2-expression-analysis, results='asis'}
+counts <- counts[rowSums(counts>0)>1,]
+dds = DESeqDataSetFromMatrix(countData=counts,
+    colData=summarydata, design = design)
+geoMeans = apply(counts, 1, function(row) if (all(row == 0)) 0 else
+                 exp(mean(log(row[row != 0]))))
+dds = estimateSizeFactors(dds, geoMeans=geoMeans)
+dds = DESeq(dds)
+```
+
+## Dispersion estimates
+Here we plot the dispersion estimate for each gene, a measure of the variance in
+expression for each gene. The way DESeq2 works is it uses the estimation of
+the variance of genes with a similar amount of expression to better estimate the
+variance of each individual gene since we only have 8 datapoints to measure
+the gene-wise variance. In this plot the black points are the gene-wise
+dispersion estimation, which come from just those 8 points. The red fitted line
+is the fit for mean-variance. The blue dots are the gene-wise dispersion estimates
+shrunk back to the red line. Doing this gives the experiment much more power,
+and helps to estimate differentially expressed genes at low expression levels.
+
+```{r dispersion-estimate}
+plotDispEsts(dds)
+```
+
+```{r deseq2-handler}
+handle_deseq2 = function(dds, summarydata, column) {
+  all_combs = combn(levels(summarydata[,column]), 2, simplify=FALSE)
+  all_results = list()
+  contrast_strings = list()
+  for(comb in all_combs) {
+    contrast_string = paste(comb, collapse=" vs ")
+    contrast = c(column, comb)
+    res = results(dds, contrast=contrast)
+    res = res[order(res$padj),]
+    all_results = c(all_results, res)
+    contrast_strings = c(contrast_strings, contrast_string)
+  }
+  names(all_results) = contrast_strings
+  return(all_results)
+}
+```
+
+## MA-plots
+This plot shows the log fold change of each gene on the y axis and the mean
+expression on the x axis. Positive log fold change values are higher in
+the negative fraction. You can see there is an excess of genes that are
+highly expressed in the negative fraction than the positive fraction. This
+makes sense if the negative fraction is expected to be a mixture of many different
+cell types and the positive fraction is more homogeneous.
+
+
+```{r DESeq-output, results='asis'}
+all_results = handle_deseq2(dds, summarydata, condition)
+len = length(all_results)
+nr = ceiling( len / 3 )
+nc = ceiling( len / nr )
+par(mfrow=c(nr,nc))
+for(i in seq(length(all_results))) {
+  plotMA(all_results[[i]])
+  title(paste("MA plot for contrast", names(all_results)[i]))
+}
+```
+
+## Volcano-plots
+
+```{r DESeq-volcano}
+for(i in seq(length(all_results))) {
+  stats = as.data.frame(all_results[[i]][,c(2,6)])
+  p = volcano_density_plot(stats, title=names(all_results)[i], lfc.cutoff=1.5)
+  print(p)
+}
+```
+
+## DEGreport
+
+```{r get-groups}
+get_groups <- function(d, comp, condition)
+{
+  g <- unlist(strsplit(comp," "))
+  g1 <- d$Name[d[, (names(d)==condition)]==g[1]]
+  g2 <- d$Name[d[, (names(d)==condition)]==g[3]]
+  list(g1,g2)
+}
+```
+
+### Pvalues-vs-Mean
+
+Here we plot some information about how the p-values are correlated with the
+mean or the standard deviation.
+
+```{r DEGreport-M}
+plots = list()
+scale_factor = round(1/nr * 14)
+for(i in seq(length(all_results))) {
+  plots[[i]] = degMean(all_results[[i]]$pvalue, rlogMat) +
+  theme_bw(base_size = scale_factor) +
+  ggtitle(paste0("Pvalues-vs-Mean for ", names(all_results)[i]))
+}
+do.call(grid.arrange,plots)
+```
+
+### Pvalues-vs-Variation
+
+```{r DEGreport-V}
+plots = list()
+for(i in seq(length(all_results))) {
+  plots[[i]] = degVar(all_results[[i]]$pvalue, rlogMat) +
+  theme_bw(base_size = scale_factor) +
+  ggtitle(paste0("Pvalues-vs-Variation for ", names(all_results)[i]))
+}
+do.call(grid.arrange,plots)
+```
+
+### Mean-vs-Variation
+```{r DEGreport-MV}
+plots = list()
+for(i in seq(length(all_results))) {
+  g <- get_groups(summarydata, names(all_results)[i], condition)
+  if(length(g[[1]]) < 2 | length(g[[2]]) < 2) {
+     next
+   }
+  plots[[i]] = degMV(g[[1]], g[[2]], all_results[[i]]$pvalue, counts(dds,normalized=TRUE)) +
+  theme_bw(base_size = scale_factor) +
+  ggtitle(paste0("Mean-vs-Variation for ", names(all_results)[i]))
+}
+if(length(plots) > 0) {
+    do.call(grid.arrange,plots)
+}
+```
+
+## Differentially expressed genes
+
+```{r DESeq-tables, results='asis'}
+for(i in seq(length(all_results))) {
+  cat(paste("Lowest adjusted p-value hits for", names(all_results)[i]))
+  out_df = as.data.frame(all_results[[i]])
+  print(knitr::kable(head(out_df)))
+  write.table(out_df, file=paste(names(all_results)[i], ".tsv", sep=""),
+                         quote=FALSE, sep="\t", row.names=TRUE, col.names=TRUE)
+  cat("\n")
+}
+```
+
+## Digging into the results
+There are a `r sum(res$padj < 0.05)` differentially expressed genes between
+the positive and negative fractions using an adjusted p-value cutoff of 0.05.
+
+That is quite a bit. If we take the top 500 and do a GO analysis,
