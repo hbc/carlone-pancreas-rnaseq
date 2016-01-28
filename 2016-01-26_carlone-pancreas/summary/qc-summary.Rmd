@@ -443,3 +443,19 @@ And images of GO enriched terms:
 * GO analysis of all differentially regulated genes: [GO all DE genes](images/GO-all-de.gif)
 * GO analysis of just the genes higher in the tdTomato negative samples: [GO higher negative](images/GO-up-in-neg.gif)
 * GO analysis of just the genes higher in the tdTomato positive samples [GO higher positive](images/GO-down-in-neg.gif)
+
+
+## Overlap with previous work
+```{r plot-overlap}
+alpha = data.frame(readr::read_csv("../../metadata/alpha-specific.csv"))
+res$previous = ifelse(res$mgi_symbol %in% alpha$gene.name, "alpha",
+                ifelse(res$mgi_symbol %in% beta$gene.name, "beta", "none"))
+res$de = res$padj < 0.05
+ggplot(subset(res, previous != "none"),
+       aes(baseMean, log2FoldChange, color=previous, shape=padj < 0.05)) +
+   geom_point(alpha=0.8) +
+   scale_x_log10() +
+   xlab("mean expression value") +
+   ylab("log2 fold change (positive is higher in the tdTomato negative fraction") +
+   theme_bw()
+```
