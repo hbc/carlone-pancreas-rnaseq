@@ -342,6 +342,9 @@ for(i in seq(length(all_results))) {
 ```
 
 ## Volcano-plots
+This is another way to look at the data, plotting the log2 fold change on the
+x-axis and the log of the p-value on the y-axis. We can see here there are
+many genes with a high fold change and a very low p-value.
 
 ```{r DESeq-volcano}
 for(i in seq(length(all_results))) {
@@ -350,47 +353,6 @@ for(i in seq(length(all_results))) {
   print(p)
 }
 ```
-
-## DEGreport
-
-```{r get-groups}
-get_groups <- function(d, comp, condition)
-{
-  g <- unlist(strsplit(comp," "))
-  g1 <- d$Name[d[, (names(d)==condition)]==g[1]]
-  g2 <- d$Name[d[, (names(d)==condition)]==g[3]]
-  list(g1,g2)
-}
-```
-
-### Pvalues-vs-Mean
-
-Here we plot some information about how the p-values are correlated with the
-mean or the standard deviation.
-
-```{r DEGreport-M}
-plots = list()
-scale_factor = round(1/nr * 14)
-for(i in seq(length(all_results))) {
-  plots[[i]] = degMean(all_results[[i]]$pvalue, rlogMat) +
-  theme_bw(base_size = scale_factor) +
-  ggtitle(paste0("Pvalues-vs-Mean for ", names(all_results)[i]))
-}
-do.call(grid.arrange,plots)
-```
-
-### Pvalues-vs-Variation
-
-```{r DEGreport-V}
-plots = list()
-for(i in seq(length(all_results))) {
-  plots[[i]] = degVar(all_results[[i]]$pvalue, rlogMat) +
-  theme_bw(base_size = scale_factor) +
-  ggtitle(paste0("Pvalues-vs-Variation for ", names(all_results)[i]))
-}
-do.call(grid.arrange,plots)
-```
-
 ### Mean-vs-Variation
 ```{r DEGreport-MV}
 plots = list()
@@ -409,6 +371,7 @@ if(length(plots) > 0) {
 ```
 
 ## Differentially expressed genes
+Here we dump out a table of all of the differentially expressed genes.
 
 ```{r DESeq-tables, results='asis'}
 for(i in seq(length(all_results))) {
@@ -422,7 +385,59 @@ for(i in seq(length(all_results))) {
 ```
 
 ## Digging into the results
-There are a `r sum(res$padj < 0.05)` differentially expressed genes between
-the positive and negative fractions using an adjusted p-value cutoff of 0.05.
+When we talked, one of the questions was what the tdTomato positive cells are.
+I'm not sure we can answer that question from just this data; when we are doing
+differential expression between the positive and negative fraction, we're likely
+looking at the differences in the composition of the populations of cells. We
+can answer questions like the positive cells express more genes involved
+in certain pathways but we can't say too much about the composition. To get
+at that, we'd have to do single-cell RNA-seq.
 
-That is quite a bit. If we take the top 500 and do a GO analysis,
+That being said, we could look to see if among the genes that are
+differentially expressed, if there are pathways that are overrepresented.
+
+There are a `r nrow(subset(res, padj < 0.05))` differentially expressed genes between
+the positive and negative fractions using an adjusted p-value cutoff of 0.05.
+They are spread about evenly in each direction, 1800 each.
+
+
+```{r convert-symbols}
+library(biomaRt)
+mouse = useMart(biomart = "ENSEMBL_MART_ENSEMBL",
+                dataset="mmusculus_gene_ensembl",
+                host = "jul2015.archive.ensembl.org")
+conversions = getBM(attributes=c("ensembl_gene_id", "mgi_symbol"), mart=mouse)
+```
+
+Here we write out subsets of the genes. First we write out a subset that is
+expressed, defined as having a base mean expression value greater than 10.
+Then we write out the set of genes differentially expressed and two subsets,
+one highly (> 4fold) up and highly (> 4fold) down in the negative samples
+compared to the positive samples.
+
+```{r write-de-subsets}
+res = data.frame(res)
+res$ensembl_gene_id = rownames(res)
+library(dplyr)
+res = res %>% left_join(conversions, by="ensembl_gene_id")
+write.table(subset(res, baseMean > 10)$mgi_symbol,
+            file="expressed.txt", quote=FALSE, row.names=FALSE, col.names=FALSE)
+write.table(subset(res, baseMean > 10 & padj < 0.05)$mgi_symbol,
+file="de_symbols.txt", quote=FALSE, row.names=FALSE, col.names=FALSE)
+write.table(subset(res, baseMean > 10 & padj < 0.05 & log2FoldChange > 4)$mgi_symbol,
+file="up_neg.txt", quote=FALSE, row.names=FALSE, col.names=FALSE)
+write.table(subset(res, baseMean > 10 & padj < 0.05 & log2FoldChange < 4)$mgi_symbol,
+file="down_neg.txt", quote=FALSE, row.names=FALSE, col.names=FALSE)
+```
+
+Here are the top 10 KEGG pathways for each set:
+
+* KEGG analysis of all differentially regulated genes: [KEGG all DE genes](webgestalt/KEGG-all-de.html)
+* KEGG analysis of just the genes higher in the tdTomato negative samples: [KEGG higher negative](webgestalt/KEGG-up-in-neg.html)
+* KEGG analysis of just the genes higher in the tdTomato positive samples: [KEGG higher positive](webgestalt/KEGG-down-in-neg.html)
+
+And images of GO enriched terms:
+
+* KEGG analysis of all differentially regulated genes: [KEGG all DE genes](webgestalt/KEGG-all-de.html)
+* KEGG analysis of just the genes higher in the tdTomato negative samples: [KEGG higher negative](webgestalt/KEGG-up-in-neg.html)
+* KEGG analysis of just the genes higher in the tdTomato positive samples [KEGG higher positive](webgestalt/KEGG-down-in-neg.html)
