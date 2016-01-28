@@ -416,10 +416,12 @@ one highly (> 4fold) up and highly (> 4fold) down in the negative samples
 compared to the positive samples.
 
 ```{r write-de-subsets}
+res = all_results[[1]]
 res = data.frame(res)
 res$ensembl_gene_id = rownames(res)
 library(dplyr)
 res = res %>% left_join(conversions, by="ensembl_gene_id")
+write.table(res, file="neg vs pos.tsv", sep="\t", col.names=TRUE, row.names=TRUE, quote=FALSE)
 write.table(subset(res, baseMean > 10)$mgi_symbol,
             file="expressed.txt", quote=FALSE, row.names=FALSE, col.names=FALSE)
 write.table(subset(res, baseMean > 10 & padj < 0.05)$mgi_symbol,
@@ -438,6 +440,6 @@ Here are the top 10 KEGG pathways for each set:
 
 And images of GO enriched terms:
 
-* KEGG analysis of all differentially regulated genes: [KEGG all DE genes](webgestalt/KEGG-all-de.html)
-* KEGG analysis of just the genes higher in the tdTomato negative samples: [KEGG higher negative](webgestalt/KEGG-up-in-neg.html)
-* KEGG analysis of just the genes higher in the tdTomato positive samples [KEGG higher positive](webgestalt/KEGG-down-in-neg.html)
+* GO analysis of all differentially regulated genes: [GO all DE genes](images/GO-all-de.gif)
+* GO analysis of just the genes higher in the tdTomato negative samples: [GO higher negative](images/GO-up-in-neg.gif)
+* GO analysis of just the genes higher in the tdTomato positive samples [GO higher positive](images/GO-down-in-neg.gif)
