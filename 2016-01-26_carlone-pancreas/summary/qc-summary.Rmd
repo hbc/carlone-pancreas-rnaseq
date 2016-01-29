@@ -459,3 +459,21 @@ ggplot(subset(res, previous != "none"),
    ylab("log2 fold change (positive is higher in the tdTomato negative fraction") +
    theme_bw()
 ```
+
+## tdTomato counts
+```{r tdTomato}
+dirs = c("Is1", "Is2", "Is3", "IS4", "IS5", "Is6", "IS7", "Is8")
+sf_files = file.path("tdTomato", dirs, "quant.sf")
+tx2genetomato = rbind(tx2gene, data.frame(V1="tdTomato", V2="tdTomato"))
+txi.tdtomato = tximport(sf_files, type="salmon", tx2gene=tx2genetomato,
+                      reader=readr::read_tsv)
+txi.tdtomato = data.frame(txi.tdtomato)
+tdtomato = txi.tdtomato["tdTomato", c(1:8)]
+colnames(tdtomato) = c("pos-M1", "neg-M1", "pos-M2", "neg-M2",
+                       "pos-F3", "neg-F3", "pos-F4", "neg-F4")
+melted = melt(tdtomato)
+colnames(melted) = c("sample", "abundance")
+ggplot(melted, aes(sample, abundance)) +
+  geom_bar(stat='identity', position='dodge') +
+  theme_bw()
+```
