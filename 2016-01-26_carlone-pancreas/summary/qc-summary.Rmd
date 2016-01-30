@@ -78,7 +78,7 @@ conversions = getBM(attributes=c("ensembl_gene_id", "mgi_symbol"), mart=mouse)
 out_counts = counts
 out_counts$ensembl_gene_id = rownames(out_counts)
 out_counts = out_counts %>% left_join(conversions, by="ensembl_gene_id")
-write.table(out_counts, file="counts.tsv", sep="\t", row.names=TRUE, col.names=TRUE, quote=FALSE)
+write.table(out_counts, file="counts.tsv", sep="\t", row.names=FALSE, col.names=TRUE, quote=FALSE)
 ```
 
 ```{r heatmap-function}
@@ -485,4 +485,11 @@ colnames(melted) = c("sample", "abundance")
 ggplot(melted, aes(sample, abundance)) +
   geom_bar(stat='identity', position='dodge') +
   theme_bw()
+```
+
+```{r write-counts-results-combined)
+counts_with_id = counts
+counts_with_id$ensembl_gene_id = rownames(counts)
+res_combined = res %>% left_join(counts_with_id, by="ensembl_gene_id")
+write.table(res_combined, file="results-with-counts.tsv", sep="\t", row.names=FALSE, col.names=TRUE, quote=FALSE)
 ```
