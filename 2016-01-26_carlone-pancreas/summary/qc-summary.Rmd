@@ -67,7 +67,18 @@ known_columns = c("Name", "X.GC", "Exonic.Rate", "Sequences.flagged.as.poor.qual
     "avg_coverage_per_region", "Mapped.Reads")
 metadata = summarydata[, !colnames(summarydata) %in% known_columns, drop=FALSE]
 write.table(summarydata, file="summarydata.tsv", sep="\t", row.names=TRUE, col.names=TRUE, quote=FALSE)
-write.table(counts, file="counts.tsv", sep="\t", row.names=TRUE, col.names=TRUE, quote=FALSE)
+```
+
+```{r write-out-counts}
+library(biomaRt)
+mouse = useMart(biomart = "ENSEMBL_MART_ENSEMBL",
+                dataset="mmusculus_gene_ensembl",
+                host = "jul2015.archive.ensembl.org")
+conversions = getBM(attributes=c("ensembl_gene_id", "mgi_symbol"), mart=mouse)
+out_counts = counts
+out_counts$ensembl_gene_id = rownames(out_counts)
+out_counts = out_counts %>% left_join(conversions, by="ensembl_gene_id")
+write.table(out_counts, file="counts.tsv", sep="\t", row.names=TRUE, col.names=TRUE, quote=FALSE)
 ```
 
 ```{r heatmap-function}
