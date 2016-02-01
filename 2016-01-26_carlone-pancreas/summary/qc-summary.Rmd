@@ -20,6 +20,7 @@ way to look at the data and Sailfish in particular does a much better job than
 traditional methods accurately quantitating genes that have many homologs.
 
 ```{r qc-setup}
+library(dplyr)
 library(ggplot2)
 library(reshape)
 library(gplots)
